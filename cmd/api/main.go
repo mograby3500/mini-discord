@@ -13,6 +13,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"github.com/mograby3500/mini-discord/websocket"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/mograby3500/mini-discord/cmd/api/auth"
@@ -21,6 +22,7 @@ import (
 type App struct {
 	DB     *sqlx.DB
 	Router *mux.Router
+	Hub    *websocket.Hub
 }
 
 type User struct {
@@ -67,6 +69,12 @@ func (a *App) Initialize() error {
 	a.Router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}).Methods("GET")
+	a.Router.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		websocket.HandleWebSocket(a.DB, a.Hub, w, r)
+	}).Methods("GET")
+
+	a.Hub = websocket.NewHub()
+	go a.Hub.Run()
 
 	return nil
 }
