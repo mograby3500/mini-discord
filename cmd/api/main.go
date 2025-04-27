@@ -14,6 +14,8 @@ import (
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/mograby3500/mini-discord/cmd/api/auth"
 )
 
 type App struct {
@@ -26,6 +28,10 @@ type User struct {
 	Username string `db:"username"`
 	Email    string `db:"email"`
 	Password string `db:"password"`
+}
+
+type CreateServerRequest struct {
+	Name string `json:"name"` // The 'name' field in the JSON body will be mapped to this struct field
 }
 
 func (a *App) Initialize() error {
@@ -131,8 +137,32 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleCreateServer(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement JWT validation and server creation
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+    tokenStr := r.Header.Get("Authorization")
+
+    userID, err := auth.ValidateToken(tokenStr)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	var request CreateServerRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	// Insert user into database
+	_, err = a.DB.Exec(
+		"INSERT INTO servers (name, owner_id) VALUES ($1, $2)",
+		request.Name, userID,
+	)
+	if err != nil {
+		http.Error(w, "Could not create server", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"message": "server created"})
 }
 
 func main() {
