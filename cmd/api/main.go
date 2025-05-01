@@ -172,8 +172,8 @@ func (a *App) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 
     //Create default channel for the server
     _, err = a.DB.Exec(
-        "INSERT INTO channels (server_id, name, type) VALUES ($1, \"text\", \"text\")",
-        server_id,
+        "INSERT INTO channels (server_id, name, type) VALUES ($1, $2, $3)",
+        server_id, "text", "text",
     )
     if err != nil {
         http.Error(w, "Could not create default channel", http.StatusInternalServerError)
@@ -181,7 +181,7 @@ func (a *App) handleCreateServer(w http.ResponseWriter, r *http.Request) {
     }
 
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{"message": "server created with"})
+	json.NewEncoder(w).Encode(map[string]string{"message": "server created"})
 }
 
 func main() {
