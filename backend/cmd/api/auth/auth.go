@@ -2,6 +2,8 @@ package auth
 
 import (
 	"errors"
+	"os"
+
 	"github.com/dgrijalva/jwt-go"
 )
 
@@ -14,7 +16,7 @@ func ValidateToken(tokenStr string) (float64, error) {
 			return nil, errors.New("unexpected signing method")
 		}
 		// Return the secret key to verify the token
-		return []byte("your-secret-key"), nil
+		return []byte(os.Getenv("JWT_SECRET_KEY")), nil
 	})
 	if err != nil || !token.Valid {
 		return 0, errors.New("invalid token")
