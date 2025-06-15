@@ -5,7 +5,9 @@ import Navbar from './components/Navbar';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
+import Home from './pages/Home';
 import ProtectedRoute from './components/ProtectedRoute';
+import PublicRoute from './components/PublicRoute';
 
 function App() {
   return (
@@ -13,8 +15,9 @@ function App() {
       <Router>
         <Navbar />
         <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
+          <Route path="/login" element={<PublicRoute> <Login/> </PublicRoute>} />
+          <Route path="/register" element={<PublicRoute> <Register/> </PublicRoute>} />
+          <Route path="/" element={<PublicRoute> <Home/> </PublicRoute>} />
           <Route
             path="/dashboard"
             element={
@@ -23,7 +26,6 @@ function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="/" element={<h2>Home Page</h2>} />
         </Routes>
       </Router>
     </AuthProvider>
