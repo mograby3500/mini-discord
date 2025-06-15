@@ -11,10 +11,11 @@ import (
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gorilla/mux"
 	"github.com/jmoiron/sqlx"
-	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"github.com/mograby3500/mini-discord/websocket"
 	"golang.org/x/crypto/bcrypt"
+
+	"time"
 
 	"github.com/mograby3500/mini-discord/cmd/api/auth"
 )
@@ -37,11 +38,6 @@ type CreateServerRequest struct {
 }
 
 func (a *App) Initialize() error {
-	// Load environment variables from .env file
-	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found, relying on system environment variables")
-	}
-
 	// Get database connection details from environment variables
 	dbUser := os.Getenv("DB_USER")
 	dbPassword := os.Getenv("DB_PASSWORD")
@@ -50,14 +46,23 @@ func (a *App) Initialize() error {
 	dbPort := os.Getenv("DB_PORT")
 	dbSSLMode := os.Getenv("DB_SSLMODE")
 
-	// Construct PostgreSQL connection string
 	connStr := fmt.Sprintf("user=%s password=%s dbname=%s host=%s port=%s sslmode=%s",
 		dbUser, dbPassword, dbName, dbHost, dbPort, dbSSLMode)
 
-	// Connect to PostgreSQL
-	db, err := sqlx.Connect("postgres", connStr)
+	var db *sqlx.DB
+	var err error
+	maxRetries := 10
+	for i := range maxRetries {
+		db, err = sqlx.Connect("postgres", connStr)
+		if err == nil {
+			break
+		}
+
+		log.Printf("Database not ready, retrying in 3 seconds... (%d/%d)\n", i+1, maxRetries)
+		time.Sleep(3 * time.Second)
+	}
 	if err != nil {
-		return fmt.Errorf("failed to connect to database: %w", err)
+		return fmt.Errorf("failed to connect to database after %d retries: %w", maxRetries, err)
 	}
 	a.DB = db
 
@@ -118,7 +123,7 @@ func (a *App) handleSignup(w http.ResponseWriter, r *http.Request) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"user_id": dbUser.ID,
 	})
-	tokenString, err := token.SignedString([]byte("your-secret-key"))
+	tokenString, err := token.SignedString([]byte(os.Getenv("JWT_SECRET_KEY")))
 	if err != nil {
 		http.Error(w, "Server error", http.StatusInternalServerError)
 		return
@@ -155,7 +160,7 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"user_id": dbUser.ID,
 	})
-	tokenString, err := token.SignedString([]byte("your-secret-key"))
+	tokenString, err := token.SignedString([]byte(os.Getenv("JWT_SECRET_KEY")))
 	if err != nil {
 		http.Error(w, "Server error", http.StatusInternalServerError)
 		return
