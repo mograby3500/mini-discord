@@ -65,6 +65,7 @@ func (a *App) Initialize() error {
 	a.Router = mux.NewRouter()
 	a.Router.HandleFunc("/signup", a.handleSignup).Methods("POST")
 	a.Router.HandleFunc("/login", a.handleLogin).Methods("POST")
+	a.Router.HandleFunc("/user", a.getUser).Methods("GET")
 	a.Router.HandleFunc("/servers", a.handleCreateServer).Methods("POST")
 	a.Router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
@@ -103,8 +104,27 @@ func (a *App) handleSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{"message": "User created"})
+	var dbUser User
+	err = a.DB.Get(&dbUser, "SELECT id FROM users WHERE email=$1", user.Email)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "User not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "Server error", http.StatusInternalServerError)
+		return
+	}
+	// Generate JWT
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id": dbUser.ID,
+	})
+	tokenString, err := token.SignedString([]byte("your-secret-key"))
+	if err != nil {
+		http.Error(w, "Server error", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{"token": tokenString})
 }
 
 func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -142,6 +162,28 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(map[string]string{"token": tokenString})
+}
+
+func (a *App) getUser(w http.ResponseWriter, r *http.Request) {
+	tokenStr := r.Header.Get("Authorization")
+
+	userID, err := auth.ValidateToken(tokenStr)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	var user User
+	err = a.DB.Get(&user, "SELECT id, username, email FROM users WHERE id=$1", userID)
+	if err == sql.ErrNoRows {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		http.Error(w, "Server error", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(user)
 }
 
 func (a *App) handleCreateServer(w http.ResponseWriter, r *http.Request) {
@@ -184,12 +226,31 @@ func (a *App) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "server created with default channel", "server_id": fmt.Sprintf("%d", server_id)})
 }
 
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin == "http://localhost:3000" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	app := &App{}
 	if err := app.Initialize(); err != nil {
 		log.Fatal(err)
 	}
-
+	handler := corsMiddleware(app.Router)
 	log.Println("Server running on :8080")
-	log.Fatal(http.ListenAndServe(":8080", app.Router))
+	log.Fatal(http.ListenAndServe(":8080", handler))
 }
