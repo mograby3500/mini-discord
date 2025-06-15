@@ -38,7 +38,7 @@ type CreateServerRequest struct {
 
 func (a *App) Initialize() error {
 	// Load environment variables from .env file
-	if err := godotenv.Load(); err != nil {
+	if err := godotenv.Load("../../../.env"); err != nil {
 		log.Println("No .env file found, relying on system environment variables")
 	}
 
