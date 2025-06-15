@@ -11,26 +11,73 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - ./backend/migrations:/docker-entrypoint-initdb.d
+    networks:
+      - app-network
 
   backend:
     build:
       context: ./backend
+      dockerfile: Dockerfile
     ports:
       - "8080:8080"
     env_file:
       - ./.env
     depends_on:
       - db
+    profiles:
+      - prod
+    networks:
+      - app-network
+
+  backend-dev:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    command: air
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend:/app
+    env_file:
+      - ./.env
+    depends_on:
+      - db
+    networks:
+      - app-network
+    profiles:
+      - dev
 
   frontend:
     build:
       context: ./frontend
+      dockerfile: Dockerfile
     ports:
       - "3000:80"
     depends_on:
       - backend
     networks:
       - app-network
+    profiles:
+      - prod
+
+  frontend-dev:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    command: npm start
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+    depends_on:
+      - backend-dev
+    networks:
+      - app-network
+    profiles:
+      - dev
 
 networks:
   app-network:
