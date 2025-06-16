@@ -28,3 +28,11 @@ CREATE TABLE messages (
     content TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE user_servers (
+    user_id INT REFERENCES users(id) ON DELETE CASCADE,
+    server_id INT REFERENCES servers(id) ON DELETE CASCADE,
+    role VARCHAR(20) DEFAULT 'member', -- e.g., owner, admin, member
+    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, server_id)
+);
