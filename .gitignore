@@ -1,3 +1,40 @@
+# Go build files
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/tmp/
+tmp/
+
+# Air (live reload tool)
+.air.toml
+tmp/
+build-errors.log
+
+# Build tools and dependencies
+vendor/
+dist/
+bin/
+coverage.out
+
+# Log files
+*.log
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# GoLand / JetBrains
+.idea/
+*.iml
+
+# System files
+.DS_Store
+Thumbs.db
+
+# DB
 .env
 .vscode
 /frontend/node_modules
