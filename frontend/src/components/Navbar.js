@@ -9,7 +9,7 @@ const Navbar = () => {
     <nav className="bg-gray-800 text-white p-4 shadow-md">
       <div className="container mx-auto flex justify-between items-center">
         <Link to="/" className="text-2xl font-bold hover:text-blue-400 transition-colors">
-          MyApp
+          Mini Discord
         </Link>
         <div className="space-x-4 flex items-center">
           <Link
