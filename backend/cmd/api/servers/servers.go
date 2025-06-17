@@ -37,7 +37,7 @@ type ServerWithChannels struct {
 func (h *ServerHandler) RegisterRoutes(router *mux.Router) {
 	router.HandleFunc("/servers", h.handleCreateServer).Methods("POST")
 	router.HandleFunc("/servers", h.handleGetUserServers).Methods("GET")
-
+	router.HandleFunc("/channels", h.handleCreateChannel).Methods("POST")
 }
 
 func (h *ServerHandler) handleCreateServer(w http.ResponseWriter, r *http.Request) {
@@ -165,4 +165,60 @@ func (h *ServerHandler) handleGetUserServers(w http.ResponseWriter, r *http.Requ
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+type CreateChannelRequest struct {
+	ServerID int64  `json:"server_id"`
+	Name     string `json:"name"`
+	Type     string `json:"type"` // 'text' or 'voice'
+}
+
+func (h *ServerHandler) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
+	tokenStr := r.Header.Get("Authorization")
+	userID, err := auth.ValidateToken(tokenStr)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	var request CreateChannelRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+	if request.Type != "text" && request.Type != "voice" {
+		http.Error(w, "Invalid channel type: must be 'text' or 'voice'", http.StatusBadRequest)
+		return
+	}
+	var exists bool
+	err = h.DB.Get(&exists, `
+		SELECT EXISTS (
+			SELECT 1 FROM user_servers 
+			WHERE user_id = $1 AND server_id = $2 AND role IN ('owner', 'admin')
+		)
+	`, userID, request.ServerID)
+	if err != nil {
+		http.Error(w, "Failed to verify user permissions", http.StatusInternalServerError)
+		return
+	}
+	if !exists {
+		http.Error(w, "Forbidden: You are not a member of this server", http.StatusForbidden)
+		return
+	}
+
+	var channelID int64
+	err = h.DB.QueryRow(`
+		INSERT INTO channels (server_id, name, type) 
+		VALUES ($1, $2, $3) 
+		RETURNING id
+	`, request.ServerID, request.Name, request.Type).Scan(&channelID)
+	if err != nil {
+		http.Error(w, "Failed to create channel", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message":    "channel created successfully",
+		"channel_id": fmt.Sprintf("%d", channelID),
+	})
 }
