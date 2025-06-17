@@ -52,28 +52,24 @@ func (a *App) Initialize() error {
 		return fmt.Errorf("failed to connect to database after %d retries: %w", maxRetries, err)
 	}
 	a.DB = db
-
+	a.Hub = websocket.NewHub()
 	a.Router = mux.NewRouter()
 
-	// Register auth routes
 	authHandler := &auth.Handler{DB: db}
 	authHandler.RegisterRoutes(a.Router)
 
-	// Register server routes
 	serverHandler := &servers.ServerHandler{DB: db}
 	serverHandler.RegisterRoutes(a.Router)
+
+	websocketHandler := &websocket.WebsocketHandler{DB: db, Hub: a.Hub}
+	websocketHandler.RegisterRoutes(a.Router)
 
 	// Register other routes
 	a.Router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}).Methods("GET")
-	a.Router.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		websocket.HandleWebSocket(a.DB, a.Hub, w, r)
-	}).Methods("GET")
 
-	a.Hub = websocket.NewHub()
-	go a.Hub.Run()
-
+	go a.Hub.Run(db)
 	return nil
 }
 
