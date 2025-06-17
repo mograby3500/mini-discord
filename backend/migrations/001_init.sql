@@ -15,7 +15,7 @@ CREATE TABLE servers (
 
 CREATE TABLE channels (
     id SERIAL PRIMARY KEY,
-    server_id INT REFERENCES servers(id),
+    server_id INT REFERENCES servers(id) ON DELETE CASCADE,
     name VARCHAR(50) NOT NULL,
     type VARCHAR(20) NOT NULL, -- 'text' or 'voice'
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

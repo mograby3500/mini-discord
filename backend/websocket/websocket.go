@@ -1,11 +1,11 @@
 package websocket
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 	"sync"
 
+	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/jmoiron/sqlx"
 	"github.com/mograby3500/mini-discord/cmd/api/auth"
@@ -14,15 +14,17 @@ import (
 // Message represents a chat message stored in the database
 type Message struct {
 	ID        int    `db:"id" json:"id"`
+	ServerId  int    `db:"server_id" json:"server_id"`
 	ChannelID int    `db:"channel_id" json:"channel_id"`
 	UserID    int    `db:"user_id" json:"user_id"`
 	Content   string `db:"content" json:"content"`
+	Type      string `db:"type" json:"type"`
 	CreatedAt string `db:"created_at" json:"created_at"`
 }
 
 // Hub manages WebSocket connections
 type Hub struct {
-	clients    map[int]map[*Client]bool // channel_id -> clients
+	clients    map[int]map[int]*Client // serverID -> userID -> *Client
 	broadcast  chan Message
 	register   chan *Client
 	unregister chan *Client
@@ -31,10 +33,15 @@ type Hub struct {
 
 // Client represents a WebSocket client
 type Client struct {
-	conn      *websocket.Conn
-	channelID int
-	userID    int
-	send      chan Message
+	conn    *websocket.Conn
+	userID  int
+	send    chan Message
+	servers []int
+}
+
+type WebsocketHandler struct {
+	DB  *sqlx.DB
+	Hub *Hub
 }
 
 var upgrader = websocket.Upgrader{
@@ -48,42 +55,68 @@ var upgrader = websocket.Upgrader{
 // NewHub creates a new Hub
 func NewHub() *Hub {
 	return &Hub{
-		clients:    make(map[int]map[*Client]bool),
+		clients:    make(map[int]map[int]*Client),
 		broadcast:  make(chan Message),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 	}
 }
 
-// Run starts the Hub's event loop
-func (h *Hub) Run() {
+func (h *WebsocketHandler) RegisterRoutes(router *mux.Router) {
+	router.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		handleWebSocket(h.DB, h.Hub, w, r)
+	}).Methods("GET")
+}
+
+func (h *Hub) Run(db *sqlx.DB) {
 	for {
 		select {
 		case client := <-h.register:
-			h.mutex.Lock()
-			if h.clients[client.channelID] == nil {
-				h.clients[client.channelID] = make(map[*Client]bool)
+			var serverIDs []int
+			err := db.Select(&serverIDs, `
+				SELECT server_id FROM user_servers WHERE user_id = $1
+			`, client.userID)
+			if err != nil {
+				log.Println("Database error:", err)
+				continue
 			}
-			h.clients[client.channelID][client] = true
+
+			client.servers = serverIDs
+
+			h.mutex.Lock()
+			for _, serverID := range serverIDs {
+				if h.clients[serverID] == nil {
+					h.clients[serverID] = make(map[int]*Client)
+				}
+				h.clients[serverID][client.userID] = client
+			}
 			h.mutex.Unlock()
+
 		case client := <-h.unregister:
 			h.mutex.Lock()
-			if clients, ok := h.clients[client.channelID]; ok {
-				delete(clients, client)
-				if len(clients) == 0 {
-					delete(h.clients, client.channelID)
+			for _, serverID := range client.servers {
+				if userMap, ok := h.clients[serverID]; ok {
+					delete(userMap, client.userID)
+					if len(userMap) == 0 {
+						delete(h.clients, serverID)
+					}
 				}
-				close(client.send)
 			}
 			h.mutex.Unlock()
+
 		case message := <-h.broadcast:
 			h.mutex.Lock()
-			for client := range h.clients[message.ChannelID] {
-				select {
-				case client.send <- message:
-				default:
-					close(client.send)
-					delete(h.clients[message.ChannelID], client)
+			if userMap, ok := h.clients[message.ServerId]; ok {
+				for userID, client := range userMap {
+					select {
+					case client.send <- message:
+					default:
+						close(client.send)
+						delete(userMap, userID)
+					}
+				}
+				if len(userMap) == 0 {
+					delete(h.clients, message.ServerId)
 				}
 			}
 			h.mutex.Unlock()
@@ -91,18 +124,11 @@ func (h *Hub) Run() {
 	}
 }
 
-func HandleWebSocket(db *sqlx.DB, hub *Hub, w http.ResponseWriter, r *http.Request) {
+func handleWebSocket(db *sqlx.DB, hub *Hub, w http.ResponseWriter, r *http.Request) {
 	tokenStr := r.URL.Query().Get("token")
 	userID, err := auth.ValidateToken(tokenStr)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-	channelIDStr := r.URL.Query().Get("channel_id")
-	channelID := 0
-	fmt.Sscanf(channelIDStr, "%d", &channelID)
-	if channelID == 0 {
-		http.Error(w, "Invalid channel ID", http.StatusBadRequest)
 		return
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -111,10 +137,10 @@ func HandleWebSocket(db *sqlx.DB, hub *Hub, w http.ResponseWriter, r *http.Reque
 		return
 	}
 	client := &Client{
-		conn:      conn,
-		channelID: channelID,
-		userID:    int(userID),
-		send:      make(chan Message),
+		conn:    conn,
+		userID:  int(userID),
+		send:    make(chan Message),
+		servers: []int{},
 	}
 	hub.register <- client
 	go client.writeMessages(db, hub)
@@ -146,7 +172,9 @@ func (c *Client) readMessages(db *sqlx.DB, hub *Hub) {
 
 	for {
 		var msg struct {
-			Content string `json:"content"`
+			Content   string `json:"content"`
+			ChannelID int    `json:"channel_id"`
+			ServerID  int    `json:"server_id"`
 		}
 		err := c.conn.ReadJSON(&msg)
 		if err != nil {
@@ -155,12 +183,36 @@ func (c *Client) readMessages(db *sqlx.DB, hub *Hub) {
 		}
 
 		message := Message{
-			ChannelID: c.channelID,
+			ChannelID: msg.ChannelID,
 			UserID:    c.userID,
 			Content:   msg.Content,
+			Type:      "text",
+			ServerId:  msg.ServerID,
 		}
 
-		// Store message in database
+		var count int
+		err = db.Get(&count, `
+			SELECT
+				COUNT(*)
+			FROM
+				channels
+			JOIN
+				user_servers
+			ON
+				channels.server_id = user_servers.server_id
+			WHERE
+				channels.id = $1 AND user_servers.user_id = $2
+		`, message.ChannelID, c.userID)
+
+		if err != nil {
+			log.Println("Database error:", err)
+			continue
+		}
+		if count == 0 {
+			log.Println("User not authorized to send message to channel")
+			continue
+		}
+
 		err = db.QueryRow(
 			"INSERT INTO messages (channel_id, user_id, content) VALUES ($1, $2, $3) RETURNING id, created_at",
 			message.ChannelID, message.UserID, message.Content,
@@ -169,7 +221,6 @@ func (c *Client) readMessages(db *sqlx.DB, hub *Hub) {
 			log.Println("Database error:", err)
 			continue
 		}
-
 		// Broadcast message
 		hub.broadcast <- message
 	}
