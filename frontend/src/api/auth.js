@@ -1,30 +1,17 @@
-import axios from 'axios';
-
-const API = axios.create({
-  baseURL: 'http://localhost:8080/',
-});
-
-// Attach token if present
-API.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = token;
-  }
-  return config;
-});
+import { api } from './core';
 
 export const register = async (data) => {
-  const res = await API.post('/signup', data);
+  const res = await api.post('/signup', data);
   return res.data;
 };
 
 export const login = async (data) => {
-  const res = await API.post('/login', data);
+  const res = await api.post('/login', data);
   return res.data;
 };
 
 export const getUser = async () => {
-  const res = await API.get('/user');
+  const res = await api.get('/user');
   return res.data;
 };
 

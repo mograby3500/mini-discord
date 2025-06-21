@@ -13,11 +13,11 @@ import (
 
 // Message represents a chat message stored in the database
 type Message struct {
-	ID        int    `db:"id"`
-	ChannelID int    `db:"channel_id"`
-	UserID    int    `db:"user_id"`
-	Content   string `db:"content"`
-	CreatedAt string `db:"created_at"`
+	ID        int    `db:"id" json:"id"`
+	ChannelID int    `db:"channel_id" json:"channel_id"`
+	UserID    int    `db:"user_id" json:"user_id"`
+	Content   string `db:"content" json:"content"`
+	CreatedAt string `db:"created_at" json:"created_at"`
 }
 
 // Hub manages WebSocket connections
@@ -91,44 +91,32 @@ func (h *Hub) Run() {
 	}
 }
 
-// HandleWebSocket upgrades an HTTP request to a WebSocket connection
 func HandleWebSocket(db *sqlx.DB, hub *Hub, w http.ResponseWriter, r *http.Request) {
-	// extract token from Authorization header
-	tokenStr := r.Header.Get("Authorization")
+	tokenStr := r.URL.Query().Get("token")
 	userID, err := auth.ValidateToken(tokenStr)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
-
 	channelIDStr := r.URL.Query().Get("channel_id")
-	// Parse channel ID
 	channelID := 0
 	fmt.Sscanf(channelIDStr, "%d", &channelID)
 	if channelID == 0 {
 		http.Error(w, "Invalid channel ID", http.StatusBadRequest)
 		return
 	}
-
-	// Upgrade to WebSocket
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println("WebSocket upgrade error:", err)
 		return
 	}
-
-	// Create client
 	client := &Client{
 		conn:      conn,
 		channelID: channelID,
 		userID:    int(userID),
 		send:      make(chan Message),
 	}
-
-	// Register client
 	hub.register <- client
-
-	// Start read/write goroutines
 	go client.writeMessages(db, hub)
 	client.readMessages(db, hub)
 }

@@ -1,23 +1,56 @@
-import React, { useContext } from 'react';
-import { AuthContext } from '../contexts/AuthContext';
+import React, { useEffect, useState } from 'react';
+import { getServers } from '../api/servers/servers';
+import ServersSidebar from '../components/ServersSidebar';
+import ChannelsSidebar from '../components/ChannelsSidebar';
+import Chat from '../components/chat/Chat';
 
 const Dashboard = () => {
-  const { user } = useContext(AuthContext);
+  const [servers, setServers] = useState([]);
+  const [selectedServer, setSelectedServer] = useState(null);
+  const [selectedChannel, setSelectedChannel] = useState(null);
+
+  useEffect(() => {
+    const fetchServers = async () => {
+      try {
+        const data = await getServers();
+        setServers(data);
+        if (data.length > 0) {
+          setSelectedServer(data[0]);
+        }
+      } catch (err) {
+        console.error('Failed to fetch servers:', err);
+      }
+    };
+
+    fetchServers();
+  }, []);
 
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full transform transition-all hover:scale-105">
-        <h1 className="text-3xl font-bold text-gray-800 mb-6 text-center">
-          Dashboard
-        </h1>
-        <div className="space-y-4">
-          <p className="text-lg text-gray-600">
-            <span className="font-semibold text-gray-800">Welcome,</span> {user.Username}!
-          </p>
-          <p className="text-lg text-gray-600">
-            <span className="font-semibold text-gray-800">Email:</span> {user.Email}
-          </p>
-        </div>
+    <div
+      className="flex flex-grow"
+      style={{ height: 'calc(100vh - 64px)' }}
+    >
+      <ServersSidebar
+        servers={servers}
+        selectedServerId={selectedServer?.id}
+        onSelectServer={(server) => {
+          setSelectedServer(server);
+          setSelectedChannel(server.channels[0]);
+        }}
+      />
+      <ChannelsSidebar
+        channels={selectedServer?.channels || []}
+        selectedChannelId={selectedChannel?.id}
+        onSelectChannel={setSelectedChannel}
+      />
+      <div className="flex-grow flex flex-col">
+        {selectedChannel ? (
+          <Chat channel={selectedChannel} key={selectedChannel?.id}/>
+        ) : (
+          <div className="flex flex-grow items-center justify-center text-gray-500">
+            Select a channel to start chatting
+          </div>
+        )}
       </div>
     </div>
   );
