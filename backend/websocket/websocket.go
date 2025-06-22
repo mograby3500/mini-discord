@@ -27,6 +27,7 @@ type Hub struct {
 	register   chan *Client
 	unregister chan *Client
 	mutex      sync.Mutex
+	mq         *MQ
 }
 
 // Client represents a WebSocket client
@@ -46,12 +47,13 @@ var upgrader = websocket.Upgrader{
 }
 
 // NewHub creates a new Hub
-func NewHub() *Hub {
+func NewHub(mq *MQ) *Hub {
 	return &Hub{
 		clients:    make(map[int]map[*Client]bool),
 		broadcast:  make(chan Message),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
+		mq:         mq,
 	}
 }
 
@@ -137,7 +139,6 @@ func (c *Client) writeMessages(db *sqlx.DB, hub *Hub) {
 	}
 }
 
-// readMessages receives messages from the client
 func (c *Client) readMessages(db *sqlx.DB, hub *Hub) {
 	defer func() {
 		hub.unregister <- c
@@ -170,7 +171,9 @@ func (c *Client) readMessages(db *sqlx.DB, hub *Hub) {
 			continue
 		}
 
-		// Broadcast message
-		hub.broadcast <- message
+		err = hub.mq.Publish(message)
+		if err != nil {
+			log.Println("Failed to publish message to RabbitMQ:", err)
+		}
 	}
 }

@@ -71,9 +71,13 @@ func (a *App) Initialize() error {
 		websocket.HandleWebSocket(a.DB, a.Hub, w, r)
 	}).Methods("GET")
 
-	a.Hub = websocket.NewHub()
+	mq, err := websocket.NewMQ("chat_messages")
+	if err != nil {
+		log.Fatal("RabbitMQ error:", err)
+	}
+	a.Hub = websocket.NewHub(mq)
 	go a.Hub.Run()
-
+	mq.ConsumeMessages(a.Hub)
 	return nil
 }
 
