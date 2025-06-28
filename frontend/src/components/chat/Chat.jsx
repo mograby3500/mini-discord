@@ -1,51 +1,34 @@
 import React, { useEffect, useRef, useState } from 'react';
-import ReconnectingWebSocket from 'reconnecting-websocket';
+import { useWebSocket } from '../../contexts/WebSocketContext'; // adjust path if needed
 
 const Chat = ({ channel }) => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
-  const wsRef = useRef(null);
   const bottomRef = useRef(null);
-  const token = localStorage.getItem('token');
+  const wsRef = useWebSocket();
 
   useEffect(() => {
-    if (!channel?.id || !token) return;
+    if (!channel?.id || !wsRef?.current) return;
+    const ws = wsRef.current;
 
-    const socketUrl = `ws://localhost:8080/ws?channel_id=${channel.id}&token=${token}`;
-    const ws = new ReconnectingWebSocket(socketUrl);
-
-    wsRef.current = ws;
-
-    ws.addEventListener('open', () => {
-      console.log('Connected to chat');
-    });
-
-    ws.addEventListener('message', (event) => {
+    const handleMessage = (event) => {
       try {
-        console.log(event.data);
         const msg = JSON.parse(event.data);
-        setMessages((prev) => [...prev, msg]);
+        if (msg.channel_id === channel.id) {
+          setMessages((prev) => [...prev, msg]);
+        }
       } catch (err) {
         console.error('Invalid message format', event.data);
       }
-    });
-
-    ws.addEventListener('error', (err) => {
-      console.error('WebSocket error:', err);
-    });
-
-    ws.addEventListener('close', () => {
-      console.log('WebSocket disconnected');
-    });
-
-    return () => {
-      ws.close();
     };
-  }, [channel.id, token]);
+
+    ws.addEventListener('message', handleMessage);
+    return () => ws.removeEventListener('message', handleMessage);
+  }, [channel.id, wsRef]);
 
   const sendMessage = () => {
-    if (!input.trim() || !wsRef.current) return;
-    const msg = { content: input };
+    if (!input.trim() || !wsRef?.current) return;
+    const msg = { content: input, channel_id: channel.id, 'server_id': channel.server_id };
     wsRef.current.send(JSON.stringify(msg));
     setInput('');
   };

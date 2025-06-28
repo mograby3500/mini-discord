@@ -3,6 +3,7 @@ import { getServers } from '../api/servers/servers';
 import ServersSidebar from '../components/ServersSidebar';
 import ChannelsSidebar from '../components/ChannelsSidebar';
 import Chat from '../components/chat/Chat';
+import { WebSocketProvider } from '../contexts/WebSocketContext';
 
 const Dashboard = () => {
   const [servers, setServers] = useState([]);
@@ -26,33 +27,35 @@ const Dashboard = () => {
   }, []);
 
   return (
-    <div
-      className="flex flex-grow"
-      style={{ height: 'calc(100vh - 64px)' }}
-    >
-      <ServersSidebar
-        servers={servers}
-        selectedServerId={selectedServer?.id}
-        onSelectServer={(server) => {
-          setSelectedServer(server);
-          setSelectedChannel(server.channels[0]);
-        }}
-      />
-      <ChannelsSidebar
-        channels={selectedServer?.channels || []}
-        selectedChannelId={selectedChannel?.id}
-        onSelectChannel={setSelectedChannel}
-      />
-      <div className="flex-grow flex flex-col">
-        {selectedChannel ? (
-          <Chat channel={selectedChannel} key={selectedChannel?.id}/>
-        ) : (
-          <div className="flex flex-grow items-center justify-center text-gray-500">
-            Select a channel to start chatting
-          </div>
-        )}
+    <WebSocketProvider>
+      <div
+        className="flex flex-grow"
+        style={{ height: 'calc(100vh - 64px)' }}
+      >
+        <ServersSidebar
+          servers={servers}
+          selectedServerId={selectedServer?.id}
+          onSelectServer={(server) => {
+            setSelectedServer(server);
+            setSelectedChannel(server.channels[0]);
+          }}
+        />
+        <ChannelsSidebar
+          channels={selectedServer?.channels || []}
+          selectedChannelId={selectedChannel?.id}
+          onSelectChannel={setSelectedChannel}
+        />
+        <div className="flex-grow flex flex-col">
+          {selectedChannel ? (
+            <Chat channel={selectedChannel} key={selectedChannel?.id}/>
+          ) : (
+            <div className="flex flex-grow items-center justify-center text-gray-500">
+              Select a channel to start chatting
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </WebSocketProvider>
   );
 };
 
