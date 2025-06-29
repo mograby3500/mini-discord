@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -28,6 +29,15 @@ type Channel struct {
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
+type ChatMessage struct {
+	ID        int    `db:"id" json:"id"`
+	ChannelID int    `db:"channel_id" json:"channel_id"`
+	UserID    int    `db:"user_id" json:"user_id"`
+	Content   string `db:"content" json:"content"`
+	CreatedAt string `db:"created_at" json:"created_at"`
+	UserName  string `db:"user_name" json:"user_name"`
+}
+
 type ServerWithChannels struct {
 	ID       int64     `json:"id"`
 	Name     string    `json:"name"`
@@ -38,6 +48,7 @@ func (h *ServerHandler) RegisterRoutes(router *mux.Router) {
 	router.HandleFunc("/servers", h.handleCreateServer).Methods("POST")
 	router.HandleFunc("/servers", h.handleGetUserServers).Methods("GET")
 	router.HandleFunc("/channels", h.handleCreateChannel).Methods("POST")
+	router.HandleFunc("/messages/{channel_id}", h.handleReadMessages).Methods("GET")
 }
 
 func (h *ServerHandler) handleCreateServer(w http.ResponseWriter, r *http.Request) {
@@ -130,6 +141,8 @@ func (h *ServerHandler) handleGetUserServers(w http.ResponseWriter, r *http.Requ
 			servers s ON s.id = c.server_id
 		WHERE 
 			us.user_id = $1
+		ORDER BY 
+			s.created_at DESC, c.created_at DESC
 	`, userID)
 
 	if err != nil {
@@ -221,4 +234,96 @@ func (h *ServerHandler) handleCreateChannel(w http.ResponseWriter, r *http.Reque
 		"message":    "channel created successfully",
 		"channel_id": fmt.Sprintf("%d", channelID),
 	})
+}
+
+func (h *ServerHandler) handleReadMessages(w http.ResponseWriter, r *http.Request) {
+	tokenStr := r.Header.Get("Authorization")
+	userID, err := auth.ValidateToken(tokenStr)
+	if err != nil {
+		http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	vars := mux.Vars(r)
+	channelID := vars["channel_id"]
+	if channelID == "" {
+		http.Error(w, "Missing channel_id", http.StatusBadRequest)
+		return
+	}
+	var (
+		before int64 = 0
+		limit  int   = 50
+	)
+	if beforeStr := r.URL.Query().Get("before"); beforeStr != "" {
+		if b, err := strconv.ParseInt(beforeStr, 10, 64); err == nil && b > 0 {
+			before = b
+		} else {
+			http.Error(w, "Invalid 'before' parameter", http.StatusBadRequest)
+			return
+		}
+	}
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		} else {
+			http.Error(w, "Invalid 'limit' parameter", http.StatusBadRequest)
+			return
+		}
+	}
+
+	var ServerID int64
+	err = h.DB.Get(&ServerID, `
+		SELECT server_id FROM channels WHERE id = $1
+	`, channelID)
+	if err != nil {
+		http.Error(w, "Channel not found", http.StatusNotFound)
+		return
+	}
+	var exists bool
+	err = h.DB.Get(&exists, `
+		SELECT EXISTS (
+			SELECT 1 FROM user_servers 
+			WHERE user_id = $1 AND server_id = $2 AND role IN ('owner', 'admin')
+		)
+	`, userID, ServerID)
+	if err != nil {
+		http.Error(w, "Failed to verify user permissions", http.StatusInternalServerError)
+		return
+	}
+	if !exists {
+		http.Error(w, "Forbidden: You are not a member of this server", http.StatusForbidden)
+		return
+	}
+
+	messages := []ChatMessage{}
+	query := `
+		SELECT 
+			msg.id,
+			msg.channel_id,
+			msg.content,
+			msg.created_at,
+			msg.user_id,
+			u.username AS user_name
+		FROM
+			messages msg
+		JOIN
+			users u ON msg.user_id = u.id 
+		WHERE channel_id = $1`
+	args := []interface{}{channelID}
+	if before > 0 {
+		query += " AND msg.id < $2"
+		args = append(args, before)
+		query += " ORDER BY msg.created_at DESC, msg.id DESC LIMIT $3"
+	} else {
+		query += " ORDER BY msg.created_at DESC, msg.id DESC LIMIT $2"
+	}
+	args = append(args, limit)
+	err = h.DB.Select(&messages, query, args...)
+	if err != nil {
+		log.Printf("Error fetching messages: %v", err)
+		http.Error(w, "Failed to fetch messages", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(messages)
 }
