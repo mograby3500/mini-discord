@@ -1,20 +1,27 @@
 package servers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/jmoiron/sqlx"
 	"github.com/mograby3500/mini-discord/cmd/api/auth"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type ServerHandler struct {
-	DB *sqlx.DB
+	DB      *sqlx.DB
+	MongoDB *mongo.Client
 }
 
 type CreateServerRequest struct {
@@ -30,12 +37,12 @@ type Channel struct {
 }
 
 type ChatMessage struct {
-	ID        int    `db:"id" json:"id"`
-	ChannelID int    `db:"channel_id" json:"channel_id"`
-	UserID    int    `db:"user_id" json:"user_id"`
-	Content   string `db:"content" json:"content"`
-	CreatedAt string `db:"created_at" json:"created_at"`
-	UserName  string `db:"user_name" json:"user_name"`
+	ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	ChannelID int                `bson:"channel_id" json:"channel_id"`
+	UserID    int                `bson:"user_id" json:"user_id"`
+	Content   string             `bson:"content" json:"content"`
+	CreatedAt primitive.DateTime `bson:"created_at" json:"created_at"`
+	UserName  string             `bson:"user_name,omitempty" json:"user_name,omitempty"`
 }
 
 type ServerWithChannels struct {
@@ -250,26 +257,6 @@ func (h *ServerHandler) handleReadMessages(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "Missing channel_id", http.StatusBadRequest)
 		return
 	}
-	var (
-		before int64 = 0
-		limit  int   = 50
-	)
-	if beforeStr := r.URL.Query().Get("before"); beforeStr != "" {
-		if b, err := strconv.ParseInt(beforeStr, 10, 64); err == nil && b > 0 {
-			before = b
-		} else {
-			http.Error(w, "Invalid 'before' parameter", http.StatusBadRequest)
-			return
-		}
-	}
-	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
-			limit = l
-		} else {
-			http.Error(w, "Invalid 'limit' parameter", http.StatusBadRequest)
-			return
-		}
-	}
 
 	var ServerID int64
 	err = h.DB.Get(&ServerID, `
@@ -283,7 +270,7 @@ func (h *ServerHandler) handleReadMessages(w http.ResponseWriter, r *http.Reques
 	err = h.DB.Get(&exists, `
 		SELECT EXISTS (
 			SELECT 1 FROM user_servers 
-			WHERE user_id = $1 AND server_id = $2 AND role IN ('owner', 'admin')
+			WHERE user_id = $1 AND server_id = $2
 		)
 	`, userID, ServerID)
 	if err != nil {
@@ -294,35 +281,47 @@ func (h *ServerHandler) handleReadMessages(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "Forbidden: You are not a member of this server", http.StatusForbidden)
 		return
 	}
+	limitStr := r.URL.Query().Get("limit")
+	beforeStr := r.URL.Query().Get("before")
 
-	messages := []ChatMessage{}
-	query := `
-		SELECT 
-			msg.id,
-			msg.channel_id,
-			msg.content,
-			msg.created_at,
-			msg.user_id,
-			u.username AS user_name
-		FROM
-			messages msg
-		JOIN
-			users u ON msg.user_id = u.id 
-		WHERE channel_id = $1`
-	args := []interface{}{channelID}
-	if before > 0 {
-		query += " AND msg.id < $2"
-		args = append(args, before)
-		query += " ORDER BY msg.created_at DESC, msg.id DESC LIMIT $3"
-	} else {
-		query += " ORDER BY msg.created_at DESC, msg.id DESC LIMIT $2"
+	limit := int64(50)
+	if limitStr != "" {
+		if l, err := strconv.ParseInt(limitStr, 10, 64); err == nil && l > 0 && l <= 100 {
+			limit = l
+		}
 	}
-	args = append(args, limit)
-	err = h.DB.Select(&messages, query, args...)
+
+	collection := h.MongoDB.Database(os.Getenv("MONGO_DB")).Collection("messages")
+
+	filter := bson.M{}
+	if beforeStr != "" {
+		oid, err := primitive.ObjectIDFromHex(beforeStr)
+		if err != nil {
+			http.Error(w, "Invalid 'before' ID", http.StatusBadRequest)
+			return
+		}
+		filter["_id"] = bson.M{"$lt": oid}
+	}
+	opts := options.Find().
+		SetSort(bson.D{{Key: "created_at", Value: -1}, {Key: "_id", Value: -1}}).
+		SetLimit(limit)
+
+	cursor, err := collection.Find(context.Background(), filter, opts)
 	if err != nil {
 		log.Printf("Error fetching messages: %v", err)
 		http.Error(w, "Failed to fetch messages", http.StatusInternalServerError)
 		return
+	}
+
+	var messages []ChatMessage
+	if err := cursor.All(context.Background(), &messages); err != nil {
+		log.Printf("Error decoding messages: %v", err)
+		http.Error(w, "Failed to fetch messages", http.StatusInternalServerError)
+		return
+	}
+
+	if messages == nil {
+		messages = []ChatMessage{}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(messages)

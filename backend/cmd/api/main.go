@@ -5,71 +5,54 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 	"github.com/mograby3500/mini-discord/cmd/api/auth"
 	"github.com/mograby3500/mini-discord/cmd/api/servers"
+	"github.com/mograby3500/mini-discord/db"
 	"github.com/mograby3500/mini-discord/websocket"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 type App struct {
-	DB     *sqlx.DB
-	Router *mux.Router
-	Hub    *websocket.Hub
-}
-
-type CreateServerRequest struct {
-	Name string `json:"name"`
+	SQLDB   *sqlx.DB
+	MongoDB *mongo.Client
+	Router  *mux.Router
+	Hub     *websocket.Hub
 }
 
 func (a *App) Initialize() error {
-	dbUser := os.Getenv("DB_USER")
-	dbPassword := os.Getenv("DB_PASSWORD")
-	dbName := os.Getenv("DB_NAME")
-	dbHost := os.Getenv("DB_HOST")
-	dbPort := os.Getenv("DB_PORT")
-	dbSSLMode := os.Getenv("DB_SSLMODE")
-
-	connStr := fmt.Sprintf("user=%s password=%s dbname=%s host=%s port=%s sslmode=%s",
-		dbUser, dbPassword, dbName, dbHost, dbPort, dbSSLMode)
-
-	var db *sqlx.DB
-	var err error
-	maxRetries := 10
-	for i := range maxRetries {
-		db, err = sqlx.Connect("postgres", connStr)
-		if err == nil {
-			break
-		}
-		log.Printf("Database not ready, retrying in 3 seconds... (%d/%d)\n", i+1, maxRetries)
-		time.Sleep(3 * time.Second)
-	}
+	pgDB, err := db.ConnectPostgres()
 	if err != nil {
-		return fmt.Errorf("failed to connect to database after %d retries: %w", maxRetries, err)
+		return fmt.Errorf("PostgreSQL connection failed: %w", err)
 	}
-	a.DB = db
+	a.SQLDB = pgDB
+
+	mongoClient, err := db.ConnectMongo()
+	if err != nil {
+		return fmt.Errorf("MongoDB connection failed: %w", err)
+	}
+	a.MongoDB = mongoClient
+
 	a.Hub = websocket.NewHub()
 	a.Router = mux.NewRouter()
 
-	authHandler := &auth.Handler{DB: db}
+	authHandler := &auth.Handler{DB: pgDB}
 	authHandler.RegisterRoutes(a.Router)
 
-	serverHandler := &servers.ServerHandler{DB: db}
+	serverHandler := &servers.ServerHandler{DB: pgDB, MongoDB: mongoClient}
 	serverHandler.RegisterRoutes(a.Router)
 
-	websocketHandler := &websocket.WebsocketHandler{DB: db, Hub: a.Hub}
+	websocketHandler := &websocket.WebsocketHandler{MongoDB: mongoClient, Hub: a.Hub}
 	websocketHandler.RegisterRoutes(a.Router)
 
-	// Register other routes
 	a.Router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}).Methods("GET")
 
-	go a.Hub.Run(db)
+	go a.Hub.Run(pgDB)
 	return nil
 }
 

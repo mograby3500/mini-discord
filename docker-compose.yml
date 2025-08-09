@@ -6,11 +6,24 @@ services:
     ports:
       - "5433:5432"
     environment:
-      POSTGRES_DB: ${DB_NAME}
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${SQLDB_NAME}
+      POSTGRES_USER: ${SQLDB_USER}
+      POSTGRES_PASSWORD: ${SQLDB_PASSWORD}
     volumes:
       - ./backend/migrations:/docker-entrypoint-initdb.d
+    networks:
+      - app-network
+
+  mongodb:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DB}
+    volumes:
+      - mongo-data:/data/db
     networks:
       - app-network
 
@@ -24,6 +37,7 @@ services:
       - ./.env
     depends_on:
       - db
+      - mongodb
     profiles:
       - prod
     networks:
@@ -42,6 +56,7 @@ services:
       - ./.env
     depends_on:
       - db
+      - mongodb
     networks:
       - app-network
     profiles:
@@ -82,3 +97,6 @@ services:
 networks:
   app-network:
     driver: bridge
+
+volumes:
+  mongo-data:
