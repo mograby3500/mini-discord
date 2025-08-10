@@ -242,3 +242,23 @@ func (c *Client) readMessages(mongoDB *mongo.Client, hub *Hub) {
 		hub.broadcast <- message
 	}
 }
+
+func (hub *Hub) DeleteServer(serverID int, chanelIDs []int) {
+	hub.mutex.Lock()
+	defer hub.mutex.Unlock()
+
+	if _, exists := hub.clients[serverID]; !exists {
+		return
+	}
+
+	for _, client := range hub.clients[serverID] {
+		client.servers = slices.DeleteFunc(client.servers, func(s int) bool {
+			return s == serverID
+		})
+		client.channels = slices.DeleteFunc(client.channels, func(c int) bool {
+			return slices.Contains(chanelIDs, c)
+		})
+		delete(hub.clients[serverID], client.userID)
+	}
+	delete(hub.clients, serverID)
+}

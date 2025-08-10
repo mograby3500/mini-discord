@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { getServers } from '../api/servers/servers';
-import ServersSidebar from '../components/ServersSidebar';
-import ChannelsSidebar from '../components/ChannelsSidebar';
+import Sidebar from '../components/Sidebar';
+import ServerSidebar from '../components/serverSidebar/ServerSidebar';
 import Chat from '../components/chat/Chat';
 import { WebSocketProvider } from '../contexts/WebSocketContext';
 
@@ -32,7 +32,7 @@ const Dashboard = () => {
         className="flex flex-grow"
         style={{ height: 'calc(100vh - 64px)' }}
       >
-        <ServersSidebar
+        <Sidebar
           servers={servers}
           selectedServerId={selectedServer?.id}
           onSelectServer={(server) => {
@@ -40,7 +40,8 @@ const Dashboard = () => {
             setSelectedChannel(server.channels[0]);
           }}
         />
-        <ChannelsSidebar
+        <ServerSidebar
+          server={selectedServer}
           channels={selectedServer?.channels || []}
           selectedChannelId={selectedChannel?.id}
           onSelectChannel={setSelectedChannel}

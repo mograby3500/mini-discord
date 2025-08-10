@@ -7,7 +7,7 @@ const getInitials = (name) => {
     .join('');
 };
 
-const ServersSidebar = ({ servers, selectedServerId, onSelectServer }) => {
+const Sidebar = ({ servers, selectedServerId, onSelectServer }) => {
   return (
     <div className="w-20 bg-white shadow-lg rounded-lg p-2 flex flex-col items-center space-y-4">
       {servers.map((server) => (
@@ -28,5 +28,5 @@ const ServersSidebar = ({ servers, selectedServerId, onSelectServer }) => {
   );
 };
 
-export default ServersSidebar;
+export default Sidebar;
 

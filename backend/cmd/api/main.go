@@ -42,7 +42,7 @@ func (a *App) Initialize() error {
 	authHandler := &auth.Handler{DB: pgDB}
 	authHandler.RegisterRoutes(a.Router)
 
-	serverHandler := &servers.ServerHandler{DB: pgDB, MongoDB: mongoClient}
+	serverHandler := &servers.ServerHandler{DB: pgDB, MongoDB: mongoClient, Hub: a.Hub}
 	serverHandler.RegisterRoutes(a.Router)
 
 	websocketHandler := &websocket.WebsocketHandler{MongoDB: mongoClient, Hub: a.Hub}
