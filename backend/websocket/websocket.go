@@ -31,11 +31,12 @@ type Message struct {
 }
 
 type Hub struct {
-	clients    map[int]map[int]*Client
-	broadcast  chan Message
-	register   chan *Client
-	unregister chan *Client
-	mutex      sync.Mutex
+	clients     map[int]map[int]*Client
+	broadcast   chan Message
+	register    chan *Client
+	unregister  chan *Client
+	mutex       sync.Mutex
+	clientsList []*Client
 }
 
 type Client struct {
@@ -120,6 +121,7 @@ func (h *Hub) Run(db *sqlx.DB) {
 				}
 				h.clients[serverID][client.userID] = client
 			}
+			h.clientsList = append(h.clientsList, client)
 			h.mutex.Unlock()
 
 		case client := <-h.unregister:
@@ -132,6 +134,9 @@ func (h *Hub) Run(db *sqlx.DB) {
 					}
 				}
 			}
+			h.clientsList = slices.DeleteFunc(h.clientsList, func(c *Client) bool {
+				return c.userID == client.userID
+			})
 			h.mutex.Unlock()
 
 		case message := <-h.broadcast:
@@ -261,4 +266,24 @@ func (hub *Hub) DeleteServer(serverID int, chanelIDs []int) {
 		delete(hub.clients[serverID], client.userID)
 	}
 	delete(hub.clients, serverID)
+}
+
+func (hub *Hub) AddServer(serverID int, userID int, channelIDs []int) {
+	hub.mutex.Lock()
+	defer hub.mutex.Unlock()
+	var client *Client
+	for i := range hub.clientsList {
+		if hub.clientsList[i].userID == userID {
+			client = hub.clientsList[i]
+			break
+		}
+	}
+	if client == nil {
+		log.Println("Client not found for user ID:", userID)
+		return
+	}
+	hub.clients[serverID] = make(map[int]*Client)
+	hub.clients[serverID][userID] = client
+	client.servers = append(client.servers, serverID)
+	client.channels = append(client.channels, channelIDs...)
 }

@@ -26,6 +26,21 @@ const Dashboard = () => {
     fetchServers();
   }, []);
 
+  const addNewServer = (newServer) => {
+    setServers((prevServers) => [...prevServers, newServer]);
+    setSelectedServer(newServer);
+    setSelectedChannel(newServer.channels[0]);
+  };
+
+  const deleteServer = (serverId) => {
+    setServers((prevServers) => prevServers.filter((server) => server.id !== serverId));
+    if (selectedServer?.id === serverId) {
+      const nextServer = servers.find((server) => server.id !== serverId);
+      setSelectedServer(nextServer || null);
+      setSelectedChannel(nextServer?.channels[0] || null);
+    }
+  };
+
   return (
     <WebSocketProvider>
       <div
@@ -39,12 +54,14 @@ const Dashboard = () => {
             setSelectedServer(server);
             setSelectedChannel(server.channels[0]);
           }}
+          addNewServer={addNewServer}
         />
         <ServerSidebar
           server={selectedServer}
           channels={selectedServer?.channels || []}
           selectedChannelId={selectedChannel?.id}
           onSelectChannel={setSelectedChannel}
+          deleteServer={deleteServer}
         />
         <div className="flex-grow flex flex-col">
           {selectedChannel ? (

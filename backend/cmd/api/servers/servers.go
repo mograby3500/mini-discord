@@ -115,11 +115,66 @@ func (h *ServerHandler) handleCreateServer(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{
-		"message":   "server created with default channel",
-		"server_id": fmt.Sprintf("%d", serverID),
-	})
+	var raw []struct {
+		ID         int64     `db:"id"`
+		ServerID   int64     `db:"server_id"`
+		ServerRole string    `db:"role"`
+		ServerName string    `db:"server_name"`
+		Name       string    `db:"name"`
+		Type       string    `db:"type"`
+		CreatedAt  time.Time `db:"created_at"`
+	}
+	err = h.DB.Select(&raw, `
+		SELECT
+			c.id,
+			c.server_id,
+			s.name AS server_name,
+			c.name,
+			c.type,
+			c.created_at,
+			us.role
+		FROM
+			channels c
+		JOIN
+			user_servers us ON us.server_id = c.server_id
+		JOIN
+			servers s ON s.id = c.server_id
+		WHERE
+			s.id = $1
+		ORDER BY
+			s.created_at DESC, c.created_at DESC
+	`, serverID)
+
+	serverMap := make(map[int64]*ServerWithChannels)
+	for _, row := range raw {
+		if _, exists := serverMap[row.ServerID]; !exists {
+			serverMap[row.ServerID] = &ServerWithChannels{
+				ID:       row.ServerID,
+				Name:     row.ServerName,
+				Role:     row.ServerRole,
+				Channels: []Channel{},
+			}
+		}
+		serverMap[row.ServerID].Channels = append(serverMap[row.ServerID].Channels, Channel{
+			ID:        row.ID,
+			ServerID:  row.ServerID,
+			Name:      row.Name,
+			Type:      row.Type,
+			CreatedAt: row.CreatedAt,
+		})
+	}
+	result := make([]ServerWithChannels, 0, len(serverMap))
+	for _, server := range serverMap {
+		result = append(result, *server)
+	}
+	// Add server to WebSocket hub
+	channelIDs := make([]int, len(result[0].Channels))
+	for i, channel := range result[0].Channels {
+		channelIDs[i] = int(channel.ID)
+	}
+	h.Hub.AddServer(int(serverID), int(userID), channelIDs)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }
 
 func (h *ServerHandler) handleGetUserServers(w http.ResponseWriter, r *http.Request) {
@@ -260,8 +315,8 @@ func (h *ServerHandler) handleReadMessages(w http.ResponseWriter, r *http.Reques
 	}
 
 	vars := mux.Vars(r)
-	channelID := vars["channel_id"]
-	if channelID == "" {
+	channelIDStr := vars["channel_id"]
+	if channelIDStr == "" {
 		http.Error(w, "Missing channel_id", http.StatusBadRequest)
 		return
 	}
@@ -269,7 +324,7 @@ func (h *ServerHandler) handleReadMessages(w http.ResponseWriter, r *http.Reques
 	var ServerID int64
 	err = h.DB.Get(&ServerID, `
 		SELECT server_id FROM channels WHERE id = $1
-	`, channelID)
+	`, channelIDStr)
 	if err != nil {
 		http.Error(w, "Channel not found", http.StatusNotFound)
 		return
@@ -301,8 +356,15 @@ func (h *ServerHandler) handleReadMessages(w http.ResponseWriter, r *http.Reques
 
 	collection := h.MongoDB.Database(os.Getenv("MONGO_DB")).Collection("messages")
 
-	filter := bson.M{}
-	filter["channel_id"] = channelID
+	channelID, err := strconv.ParseInt(channelIDStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid channel_id", http.StatusBadRequest)
+		return
+	}
+	filter := bson.M{
+		"channel_id": channelID,
+	}
+
 	if beforeStr != "" {
 		oid, err := primitive.ObjectIDFromHex(beforeStr)
 		if err != nil {
@@ -418,8 +480,6 @@ func (h *ServerHandler) handleDeleteServer(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "Database commit failed", http.StatusInternalServerError)
 		return
 	}
-
-	fmt.Printf("Deleting server %d with channels %v\n", serverID, channelIDs)
 
 	h.Hub.DeleteServer(int(serverID), channelIDs)
 

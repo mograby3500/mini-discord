@@ -6,7 +6,7 @@ import ConfirmDeleteModal from './ConfirmDeleteModal';
 
 import { api } from '../../../api/core';
 
-const ServerActionsDropdown = ({ serverId }) => {
+const ServerActionsDropdown = ({ serverId, deleteServer }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showAddUsersModal, setShowAddUsersModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -27,7 +27,7 @@ const ServerActionsDropdown = ({ serverId }) => {
   const onDeleteServer = () => {
     api.delete(`/servers/${serverId}`)
       .then(() => {
-        console.log(`Server ${serverId} deleted successfully`);
+        deleteServer(serverId);
       })
       .catch((error) => {
         console.error('Error deleting server:', error);
