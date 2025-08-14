@@ -23,6 +23,7 @@ type Message struct {
 	ID        string    `bson:"_id,omitempty" json:"id"`
 	ChannelID int       `bson:"channel_id" json:"channel_id"`
 	UserID    int       `bson:"user_id" json:"user_id"`
+	UserName  string    `bson:"user_name,omitempty" json:"user_name,omitempty"`
 	Content   string    `bson:"content" json:"content"`
 	Type      string    `bson:"type" json:"type"`
 	ServerId  int       `bson:"server_id" json:"server_id"`
@@ -30,16 +31,18 @@ type Message struct {
 }
 
 type Hub struct {
-	clients    map[int]map[int]*Client
-	broadcast  chan Message
-	register   chan *Client
-	unregister chan *Client
-	mutex      sync.Mutex
+	clients     map[int]map[int]*Client
+	broadcast   chan Message
+	register    chan *Client
+	unregister  chan *Client
+	mutex       sync.Mutex
+	clientsList []*Client
 }
 
 type Client struct {
 	conn     *websocket.Conn
 	userID   int
+	UserName string
 	send     chan Message
 	servers  []int
 	channels []int
@@ -101,6 +104,16 @@ func (h *Hub) Run(db *sqlx.DB) {
 			}
 			client.channels = channelIDs
 
+			var userName string
+			err = db.Get(&userName, `
+				SELECT username FROM users WHERE id = $1
+			`, client.userID)
+			if err != nil {
+				log.Println("Database error:", err)
+				continue
+			}
+			client.UserName = userName
+
 			h.mutex.Lock()
 			for _, serverID := range serverIDs {
 				if h.clients[serverID] == nil {
@@ -108,6 +121,7 @@ func (h *Hub) Run(db *sqlx.DB) {
 				}
 				h.clients[serverID][client.userID] = client
 			}
+			h.clientsList = append(h.clientsList, client)
 			h.mutex.Unlock()
 
 		case client := <-h.unregister:
@@ -120,6 +134,9 @@ func (h *Hub) Run(db *sqlx.DB) {
 					}
 				}
 			}
+			h.clientsList = slices.DeleteFunc(h.clientsList, func(c *Client) bool {
+				return c.userID == client.userID
+			})
 			h.mutex.Unlock()
 
 		case message := <-h.broadcast:
@@ -205,6 +222,7 @@ func (c *Client) readMessages(mongoDB *mongo.Client, hub *Hub) {
 		message := Message{
 			ChannelID: msg.ChannelID,
 			UserID:    c.userID,
+			UserName:  c.UserName,
 			Content:   msg.Content,
 			Type:      "text",
 			ServerId:  msg.ServerID,
@@ -228,4 +246,44 @@ func (c *Client) readMessages(mongoDB *mongo.Client, hub *Hub) {
 
 		hub.broadcast <- message
 	}
+}
+
+func (hub *Hub) DeleteServer(serverID int, chanelIDs []int) {
+	hub.mutex.Lock()
+	defer hub.mutex.Unlock()
+
+	if _, exists := hub.clients[serverID]; !exists {
+		return
+	}
+
+	for _, client := range hub.clients[serverID] {
+		client.servers = slices.DeleteFunc(client.servers, func(s int) bool {
+			return s == serverID
+		})
+		client.channels = slices.DeleteFunc(client.channels, func(c int) bool {
+			return slices.Contains(chanelIDs, c)
+		})
+		delete(hub.clients[serverID], client.userID)
+	}
+	delete(hub.clients, serverID)
+}
+
+func (hub *Hub) AddServer(serverID int, userID int, channelIDs []int) {
+	hub.mutex.Lock()
+	defer hub.mutex.Unlock()
+	var client *Client
+	for i := range hub.clientsList {
+		if hub.clientsList[i].userID == userID {
+			client = hub.clientsList[i]
+			break
+		}
+	}
+	if client == nil {
+		log.Println("Client not found for user ID:", userID)
+		return
+	}
+	hub.clients[serverID] = make(map[int]*Client)
+	hub.clients[serverID][userID] = client
+	client.servers = append(client.servers, serverID)
+	client.channels = append(client.channels, channelIDs...)
 }

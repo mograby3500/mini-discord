@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { getServers } from '../api/servers/servers';
-import ServersSidebar from '../components/ServersSidebar';
-import ChannelsSidebar from '../components/ChannelsSidebar';
+import Sidebar from '../components/Sidebar';
+import ServerSidebar from '../components/serverSidebar/ServerSidebar';
 import Chat from '../components/chat/Chat';
 import { WebSocketProvider } from '../contexts/WebSocketContext';
 
@@ -26,24 +26,42 @@ const Dashboard = () => {
     fetchServers();
   }, []);
 
+  const addNewServer = (newServer) => {
+    setServers((prevServers) => [...prevServers, newServer]);
+    setSelectedServer(newServer);
+    setSelectedChannel(newServer.channels[0]);
+  };
+
+  const deleteServer = (serverId) => {
+    setServers((prevServers) => prevServers.filter((server) => server.id !== serverId));
+    if (selectedServer?.id === serverId) {
+      const nextServer = servers.find((server) => server.id !== serverId);
+      setSelectedServer(nextServer || null);
+      setSelectedChannel(nextServer?.channels[0] || null);
+    }
+  };
+
   return (
     <WebSocketProvider>
       <div
         className="flex flex-grow"
         style={{ height: 'calc(100vh - 64px)' }}
       >
-        <ServersSidebar
+        <Sidebar
           servers={servers}
           selectedServerId={selectedServer?.id}
           onSelectServer={(server) => {
             setSelectedServer(server);
             setSelectedChannel(server.channels[0]);
           }}
+          addNewServer={addNewServer}
         />
-        <ChannelsSidebar
+        <ServerSidebar
+          server={selectedServer}
           channels={selectedServer?.channels || []}
           selectedChannelId={selectedChannel?.id}
           onSelectChannel={setSelectedChannel}
+          deleteServer={deleteServer}
         />
         <div className="flex-grow flex flex-col">
           {selectedChannel ? (
